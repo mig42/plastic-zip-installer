@@ -32,11 +32,24 @@ plasticscm-mono-4.6.2.tar.gz"
         return Uris._server.format(version)
 
 
-class PlasticPaths:
+BASE = "/opt/plasticscm5"
+
+
+class Paths:
+    CertsFile = "/etc/ssl/certs/ca-certificates.crt"
     Base = "/opt/plasticscm5"
-    Client = "{}/client".format(Base)
-    Server = "{}/server".format(Base)
-    Cm = "{}/cm".format(Client)
+
+    class Mono:
+        _bin = "{}/mono/bin".format(BASE)
+        _certtools = "{}/certtools".format(BASE)
+        CertSync = "{}/cert-sync".format(_bin)
+        CertMgr = "{}/certmgr".format(_certtools)
+        Mozroots = "{}/mozroots".format(_certtools)
+
+    class Plastic:
+        Client = "{}/client".format(BASE)
+        Server = "{}/server".format(BASE)
+        Cm = "{}/cm".format(Client)
 
     class Tmp:
         Base = "{}/plasticupdater".format(tempfile.gettempdir())
@@ -106,26 +119,28 @@ def get_first_version(html):
 
 
 def retrieve_current_version():
-    if not os.path.isdir(PlasticPaths.Base) or not os.path.exists(PlasticPaths.Cm):
+    if not os.path.isdir(BASE) or not os.path.exists(Paths.Plastic.Cm):
         return None
     return subprocess.run(
-        [PlasticPaths.Cm, "version"], stdout=subprocess.PIPE).stdout
+        [Paths.Plastic.Cm, "version"], stdout=subprocess.PIPE).stdout
 
 
 def get_tmp_dir():
-    if not os.path.isdir(PlasticPaths.Tmp.Base):
-        os.makedirs(PlasticPaths.Tmp.Base)
-    return PlasticPaths.Tmp.Base
+    if not os.path.isdir(Paths.Tmp.Base):
+        os.makedirs(Paths.Tmp.Base)
+    return Paths.Tmp.Base
 
 
 def do_upgrade(version):
-    pass  # TODO
+    print("Upgrading Plastic SCM to version {}".format(version))
+    # TODOS
 
 
 def do_first_install(version):
     print("Installing Plastic SCM for the first time!")
-    os.makedirs(PlasticPaths.Base, exist_ok=True)
+    print("Version: {}".format(version))
 
+    os.makedirs(BASE, exist_ok=True)
     try:
         install_mono()
         install_client(version)
@@ -138,6 +153,11 @@ def do_first_install(version):
 
 
 def install_mono():
+    download_mono()
+    update_certificates()
+
+
+def download_mono():
     print("Downloading mono from '{}'...".format(Uris.Mono))
     try:
         with urlopen(Uris.Mono) as response:
@@ -148,10 +168,66 @@ def install_mono():
             downloaded_tar = tarfile.TarFile(
                 fileobj=decompressed_data, mode="r")
 
-            downloaded_tar.extractall(PlasticPaths.Base)
+            downloaded_tar.extractall(BASE)
     except Exception as e:
-        shutil.rmtree(PlasticPaths.Mono, ignore_errors=True)
+        shutil.rmtree(Paths.Plastic.Mono, ignore_errors=True)
         raise
+
+
+def update_certificates():
+    run_certificates_command()
+    if os.path.isfile(Paths.CertsFile):
+        subprocess.run([Paths.Mono.CertSync, Paths.CertsFile])
+
+    run_command(
+        Paths.Mono.CertMgr,
+        ["-ssl", "-m", "-y", "https://www.plasticscm.com/"])
+    run_command(
+        Paths.Mono.CertMgr,
+        ["-ssl", "-m", "-y", "https://cloud.plasticscm.com/"])
+
+    run_command(
+        Paths.Mono.Mozroots, ["--import", "--machine", "--add-only"])
+
+
+def run_certificates_command():
+    certs_command, args = get_certificates_command()
+    if certs_command is None:
+        print("Unable to update certificates", file=sys.stderr)
+        return
+
+    run_command(certs_command, args)
+
+
+def run_command(name, args):
+    print("Executing '{} {}'".format(name, args))
+    if subprocess.run([name] + args).returncode != 0:
+        print("Failed!", file=sys.stderr)
+
+
+def get_certificates_command():
+    if is_command_in_path("update-ca-certificates"):
+        return "update-ca-certificates", []
+
+    if is_command_in_path("trust"):
+        return "trust", ["extract-compat"]
+
+    return None
+
+
+def is_command_in_path(command):
+    for path in os.environ["PATH"].split(os.pathsep):
+        path = path.strip('"')
+
+        exe_file = os.path.join(path, command)
+        if is_exe(exe_file):
+            return exe_file
+
+    return None
+
+
+def is_exe(fpath):
+    return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
 
 
 def install_client(latest_version):
@@ -160,10 +236,10 @@ def install_client(latest_version):
         temp_dir = get_tmp_dir()
         download_zip_to_dir(Uris.get_client(latest_version), temp_dir)
 
-        shutil.move(PlasticPaths.Tmp.Client, PlasticPaths.Client)
+        shutil.move(Paths.Tmp.Client, Paths.Plastic.Client)
         # TODO the rest
     finally:
-        shutil.rmtree(PlasticPaths.Tmp.Client, ignore_errors=True)
+        shutil.rmtree(Paths.Tmp.Client, ignore_errors=True)
 
 
 def install_server(latest_version):
@@ -172,10 +248,10 @@ def install_server(latest_version):
         temp_dir = get_tmp_dir()
         download_zip_to_dir(Uris.get_server(latest_version), temp_dir)
 
-        shutil.move(PlasticPaths.Tmp.Server, PlasticPaths.Server)
+        shutil.move(Paths.Tmp.Server, Paths.Plastic.Server)
         # TODO the rest
     finally:
-        shutil.rmtree(PlasticPaths.Tmp.Client, ignore_errors=True)
+        shutil.rmtree(Paths.Tmp.Client, ignore_errors=True)
 
 
 def download_zip_to_dir(uri, output_dir):
