@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import gzip
 import os
 import re
 import shutil
@@ -64,18 +65,12 @@ def main():
         print("Already up to date.")
         return
 
-    try:
-        temp_dir = get_tmp_dir()
-        download_zip_to_dir(Uris.get_client(latest_version), temp_dir)
-        download_zip_to_dir(Uris.get_server(latest_version), temp_dir)
-        if not is_already_installed:
-            do_first_install()
-            return
+    if not is_already_installed:
+        do_first_install(latest_version)
+        return
 
-        if not args.no_upgrade:
-            do_upgrade()
-    finally:
-        clean_downloads()
+    if not args.no_upgrade:
+        do_upgrade(latest_version)
 
 
 def get_valid_args():
@@ -117,35 +112,27 @@ def retrieve_current_version():
         [PlasticPaths.Cm, "version"], stdout=subprocess.PIPE).stdout
 
 
-def download_zip_to_dir(uri, output_dir):
-    print("Downloading '{}'...".format(uri))
-    try:
-        with urlopen(uri) as response:
-            downloaded_zip = zipfile.ZipFile(BytesIO(response.read()))
-            downloaded_zip.extractall(output_dir)
-    except Exception as e:
-        print("Unable to download from {}: {}".format(uri, e), file=sys.stderr)
-        traceback.print_stack(file=sys.stderr)
-        return
-
-
 def get_tmp_dir():
     if not os.path.isdir(PlasticPaths.Tmp.Base):
         os.makedirs(PlasticPaths.Tmp.Base)
     return PlasticPaths.Tmp.Base
 
 
-def do_upgrade():
+def do_upgrade(version):
     pass  # TODO
 
 
-def do_first_install():
+def do_first_install(version):
     print("Installing Plastic SCM for the first time!")
     os.makedirs(PlasticPaths.Base, exist_ok=True)
 
-    install_mono()
-    install_client()
-    install_server()
+    try:
+        install_mono()
+        install_client(version)
+        install_server(version)
+    except Exception as e:
+        print("Installation failed: {}".format(e), file=sys.stderr)
+        return
 
     print("All done!")
 
@@ -154,30 +141,52 @@ def install_mono():
     print("Downloading mono from '{}'...".format(Uris.Mono))
     try:
         with urlopen(Uris.Mono) as response:
-            downloaded_tar = zipfile.TarFile(
-                fileobj=BytesIO(response.read()), mode="r:gz")
+            data = BytesIO(response.read())
+            mono_gzip = gzip.GzipFile(fileobj=data, mode='rb')
+
+            decompressed_data = BytesIO(mono_gzip.read())
+            downloaded_tar = tarfile.TarFile(
+                fileobj=decompressed_data, mode="r")
+
             downloaded_tar.extractall(PlasticPaths.Base)
     except Exception as e:
-        print("Unable to download Mono: {}".format(e), file=sys.stderr)
-        traceback.print_stack(file=sys.stderr)
-        return
+        shutil.rmtree(PlasticPaths.Mono, ignore_errors=True)
+        raise
 
 
-def install_client():
+def install_client(latest_version):
     print("Installing client...")
-    shutil.move(PlasticPaths.Tmp.Client, PlasticPaths.Client)
-    # TODO the rest
+    try:
+        temp_dir = get_tmp_dir()
+        download_zip_to_dir(Uris.get_client(latest_version), temp_dir)
+
+        shutil.move(PlasticPaths.Tmp.Client, PlasticPaths.Client)
+        # TODO the rest
+    finally:
+        shutil.rmtree(PlasticPaths.Tmp.Client, ignore_errors=True)
 
 
-def install_server():
+def install_server(latest_version):
     print("Installing server...")
-    shutil.move(PlasticPaths.Tmp.Server, PlasticPaths.Server)
-    # TODO the rest
+    try:
+        temp_dir = get_tmp_dir()
+        download_zip_to_dir(Uris.get_server(latest_version), temp_dir)
+
+        shutil.move(PlasticPaths.Tmp.Server, PlasticPaths.Server)
+        # TODO the rest
+    finally:
+        shutil.rmtree(PlasticPaths.Tmp.Client, ignore_errors=True)
 
 
-def clean_downloads():
-    shutil.rmtree(PlasticPaths.Tmp.Client, ignore_errors=True)
-    shutil.rmtree(PlasticPaths.Tmp.Server, ignore_errors=True)
+def download_zip_to_dir(uri, output_dir):
+    print("Downloading '{}'...".format(uri))
+    try:
+        with urlopen(uri) as response:
+            downloaded_zip = zipfile.ZipFile(BytesIO(response.read()))
+            downloaded_zip.extractall(output_dir)
+    except Exception as e:
+        print("Unable to download from {}: {}".format(uri, e), file=sys.stderr)
+        raise
 
 
 if __name__ == "__main__":
