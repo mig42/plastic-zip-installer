@@ -3,7 +3,6 @@
 import argparse
 import os
 import re
-import requests
 import shutil
 import subprocess
 import sys
@@ -17,6 +16,8 @@ from urllib.request import urlopen
 class Uris:
     Download = "https://www.plasticscm.com/download"
     Labs = "{}/labs".format(Download)
+    Mono = "http://www.plasticscm.com/plasticrepo/plasticscm-mono-4.6.2/\
+plasticscm-mono-4.6.2.tar.gz"
     _zips_format = \
         "{}/downloadinstaller/{{{{}}}}/plasticscm/linux/{{}}zip?Flags=None".format(Download)
     _client = _zips_format.format("client")
@@ -27,6 +28,7 @@ class Uris:
 
     def get_server(version):
         return Uris._server.format(version)
+
 
 class PlasticPaths:
     Base = "/opt/plasticscm5"
@@ -44,7 +46,9 @@ def main():
     args = get_valid_args()
 
     if os.getuid() != 0:
-        print("This installer needs to be run with administrator privileges.", file=sys.stderr)
+        print(
+            "This installer needs to be run with administrator privileges.",
+            file=sys.stderr)
         return
 
     latest_version = retrieve_latest_version(args.labs)
@@ -60,8 +64,9 @@ def main():
         return
 
     try:
-        download_to_temp(Uris.get_client(latest_version))
-        download_to_temp(Uris.get_server(latest_version))
+        temp_dir = get_tmp_dir()
+        download_zip_to_dir(Uris.get_client(latest_version), temp_dir)
+        download_zip_to_dir(Uris.get_server(latest_version), temp_dir)
         if not is_already_installed:
             do_first_install()
             return
@@ -73,12 +78,13 @@ def main():
 
 
 def get_valid_args():
-    parser = argparse.ArgumentParser(description=
-        "Install or upgrade Plastic SCM from the ZIP bundles published in their website.")
+    parser = argparse.ArgumentParser(
+        description="Install or upgrade Plastic SCM from the ZIP bundles \
+published in their website.")
     parser.add_argument(
         "--labs",
         action="store_true",
-        help="Takes advantage of the latest releases from the Plastic SCM team.")
+        help="Enable the latest releases from the Plastic SCM team.")
     parser.add_argument(
         "--no-upgrade",
         action="store_true",
@@ -106,15 +112,16 @@ def get_first_version(html):
 def retrieve_current_version():
     if not os.path.isdir(PlasticPaths.Base) or not os.path.exists(PlasticPaths.Cm):
         return None
-    return subprocess.run([PlasticPaths.Cm, "version"], stdout=subprocess.PIPE).stdout
+    return subprocess.run(
+        [PlasticPaths.Cm, "version"], stdout=subprocess.PIPE).stdout
 
 
-def download_to_temp(uri):
+def download_zip_to_dir(uri, output_dir):
     print("Downloading '{}'...".format(uri))
     try:
         with urlopen(uri) as response:
             downloaded_zip = zipfile.ZipFile(BytesIO(response.read()))
-            downloaded_zip.extractall(get_tmp_dir())
+            downloaded_zip.extractall(output_dir)
     except Exception as e:
         print("Unable to download from {}: {}".format(uri, e), file=sys.stderr)
         traceback.print_stack(file=sys.stderr)
@@ -128,7 +135,7 @@ def get_tmp_dir():
 
 
 def do_upgrade():
-    pass # TODO
+    pass  # TODO
 
 
 def do_first_install():
@@ -143,7 +150,7 @@ def do_first_install():
 
 
 def install_mono():
-    pass # TODO implement
+    download_zip_to_dir(Uris.Mono, PlasticPaths.Base)
 
 
 def install_client():
