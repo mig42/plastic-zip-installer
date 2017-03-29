@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import tarfile
 import zipfile
 from io import BytesIO
 from urllib.request import urlopen
@@ -150,7 +151,16 @@ def do_first_install():
 
 
 def install_mono():
-    download_zip_to_dir(Uris.Mono, PlasticPaths.Base)
+    print("Downloading mono from '{}'...".format(Uris.Mono))
+    try:
+        with urlopen(Uris.Mono) as response:
+            downloaded_tar = zipfile.TarFile(
+                fileobj=BytesIO(response.read()), mode="r:gz")
+            downloaded_tar.extractall(PlasticPaths.Base)
+    except Exception as e:
+        print("Unable to download Mono: {}".format(e), file=sys.stderr)
+        traceback.print_stack(file=sys.stderr)
+        return
 
 
 def install_client():
