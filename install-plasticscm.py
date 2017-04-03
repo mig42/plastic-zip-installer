@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import glob
 import gzip
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -40,21 +42,25 @@ class Paths:
     Base = "/opt/plasticscm5"
 
     class Mono:
-        _bin = "{}/mono/bin".format(BASE)
-        _certtools = "{}/certtools".format(BASE)
-        CertSync = "{}/cert-sync".format(_bin)
-        CertMgr = "{}/certmgr".format(_certtools)
-        Mozroots = "{}/mozroots".format(_certtools)
+        Base = os.path.join(BASE, "mono")
+        _bin = os.path.join(Base, "bin")
+        _certtools = os.path.join(BASE, "certtools")
+        CertSync = os.path.join(_bin, "cert-sync")
+        CertMgr = os.path.join(_certtools, "certmgr")
+        Lib = os.path.join(Base, "lib")
+        Mozroots = os.path.join(_certtools, "mozroots")
 
     class Plastic:
-        Client = "{}/client".format(BASE)
-        Server = "{}/server".format(BASE)
-        Cm = "{}/cm".format(Client)
+        Theme = os.path.join(BASE, "theme")
+        Client = os.path.join(BASE, "client")
+        ClientScripts = os.path.join(Client, "scripts")
+        Server = os.path.join(BASE, "server")
+        Cm = os.path.join(Client, "cm")
 
     class Tmp:
-        Base = "{}/plasticupdater".format(tempfile.gettempdir())
-        Server = "{}/server".format(Base)
-        Client = "{}/client".format(Base)
+        Base = os.path.join(tempfile.gettempdir(), "plasticupdater")
+        Server = os.path.join(Base, "server")
+        Client = os.path.join(Base, "client")
 
 
 def main():
@@ -237,9 +243,62 @@ def install_client(latest_version):
         download_zip_to_dir(Uris.get_client(latest_version), temp_dir)
 
         shutil.move(Paths.Tmp.Client, Paths.Plastic.Client)
-        # TODO the rest
+        shutil.move(
+            os.path.join(Paths.Plastic.Client, "theme"), Paths.Plastic.Theme)
+
+        conf_files = glob.iglob(os.path.join(
+            Paths.Plastic.ClientScripts, "*.conf"))
+        for conf_file in conf_files:
+            shutil.move(conf_file, Paths.Plastic.Client)
+
+        launchers = [
+            "clconfigureclient",
+            "cm",
+            "gtkplastic",
+            "gtkmergetool",
+            "plasticapi"
+            "repostatscalculator"
+            "mono_setup"]
+
+        for launcher in launchers:
+            launcher_path = os.path.join(Paths.Plastic.ClientScripts, launcher)
+            shutil.move(launcher_path, Paths.Plastic.Client)
+
+            dst_path = os.path.join(Paths.Plastic.Client, launcher)
+            set_executable(dst_path)
+
+            os.symlink(dst_path, os.path.join("/usr/bin", launcher))
+            if launcher == "mono_setup":
+                replace_in_file(
+                    dst_path, "@@MONOINSTALLDIR@@", Paths.Mono.Base)
+
+        shutil.move(
+            os.path.join(Paths.Plastic.Client, "gitlibs", "libgit2_x64.so"),
+            Paths.Mono.Lib)
+        shutil.rmtree(Paths.Plastic.ClientScripts, ignore_errors=True)
     finally:
         shutil.rmtree(Paths.Tmp.Client, ignore_errors=True)
+
+
+def set_executable(path):
+    perms = os.stat(path).st_mode
+    perms |= 0o111
+    os.chmod(path, stat.S_IMODE(perms))
+
+
+def replace_in_file(path, search, replace):
+    try:
+        filedata = None
+        with open(path, "r") as file:
+            filedata = file.read()
+
+        filedata = filedata.replace(search, replace)
+        with open(path, "w") as file:
+            file.write(filedata)
+    except Exception as e:
+        print(
+            "Unable to replace mono install dir in mono_launcher: {}"
+            .format(e), file=sys.stderr)
 
 
 def install_server(latest_version):
